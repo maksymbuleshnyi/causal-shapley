@@ -22,8 +22,7 @@ causal-shapley/
 │   │                                   (paper-aligned causal + asymmetric causal)
 │   ├── probabilities.py                Distribution / interventional helpers
 │   ├── utils.py                        get_baseline() and shared helpers
-│   ├── exceptions.py
-│   └── rational_shap.py                Rational-number Shapley (debug)
+│   └── exceptions.py
 │
 ├── data/                             Datasets and SCM generators
 │   ├── __init__.py                     Makes data/ a Python package
@@ -31,14 +30,14 @@ causal-shapley/
 │   │                                   + S1, S2, S3 PE-SHAP benchmarks
 │   └── german_credit.csv               Real-data case-study CSV
 │
-├── 01_canonical_comparison/          Canonical-structure comparison notebooks
+├── canonical_comparison/             Canonical-structure comparison notebooks
 │   ├── marginal_shap.ipynb               Table tab:shapley-comparison
 │   ├── conditional_shap.ipynb
 │   ├── causal_shap.ipynb
 │   ├── asymmetric_conditional_shap.ipynb
 │   └── asymmetric_causal_shap.ipynb
 │
-├── 02_path_wise_experiments/         PE-SHAP / PW-SHAP S1, S2, S3 benchmarks
+├── path_wise_experiments/            PE-SHAP / PW-SHAP S1, S2, S3 benchmarks
 │   ├── _common.py                      Shared estimator / plotting helpers
 │   ├── experiment1_chain.py            Chain-mediation derivation (S1)
 │   ├── experiment2_parallel.py         Parallel-mediator derivation (S2)
@@ -46,7 +45,7 @@ causal-shapley/
 │   ├── run_local_figure.py             Builds Figure fig:local-decomposition
 │   └── path_wise/                      PW-SHAP estimation code
 │
-└── 03_german_credit/                 Real-data case study
+└── german_credit/                    Real-data case study
     ├── german_credit.ipynb               Interactive notebook
     └── german_credit_pe_pw.py             Standalone script (PE-SHAP + PW-SHAP)
 ```
@@ -55,12 +54,12 @@ causal-shapley/
 
 | Section / figure / table | What it shows | Code location |
 |---|---|---|
-| Table `tab:shapley-comparison` | Marginal / Conditional / Asymmetric / Causal / Asymmetric Causal on C1–C6 | `01_canonical_comparison/*.ipynb` |
-| Table `tab:main-results` | PE-SHAP vs PW-SHAP vs Causal Shapley on S1, S2, S3 | `02_path_wise_experiments/run_main_table.py` |
-| Figure `fig:local-decomposition` | Per-sample PE-SHAP attribution on S2 | `02_path_wise_experiments/run_local_figure.py` |
-| Appendix `sec:chain-mediation-proof` | Closed-form chain-mediation derivation | `02_path_wise_experiments/experiment1_chain.py` |
-| Appendix `sec:parallel-mediation-proof` | Closed-form parallel-mediator derivation | `02_path_wise_experiments/experiment2_parallel.py` |
-| German Credit case study | Counterfactual gender-bias attribution | `03_german_credit/german_credit.ipynb` |
+| Table `tab:shapley-comparison` | Marginal / Conditional / Asymmetric / Causal / Asymmetric Causal on C1–C6 | `canonical_comparison/*.ipynb` |
+| Table `tab:main-results` | PE-SHAP vs PW-SHAP vs Causal Shapley on S1, S2, S3 | `path_wise_experiments/run_main_table.py` |
+| Figure `fig:local-decomposition` | Per-sample PE-SHAP attribution on S2 | `path_wise_experiments/run_local_figure.py` |
+| Appendix `sec:chain-mediation-proof` | Closed-form chain-mediation derivation | `path_wise_experiments/experiment1_chain.py` |
+| Appendix `sec:parallel-mediation-proof` | Closed-form parallel-mediator derivation | `path_wise_experiments/experiment2_parallel.py` |
+| German Credit case study | Counterfactual gender-bias attribution | `german_credit/german_credit.ipynb` |
 
 ## Setup
 
@@ -84,25 +83,27 @@ cd causal-shapley
 jupyter lab
 ```
 
-Then open any notebook in `01_canonical_comparison/`, `03_german_credit/`, etc. Each notebook starts with a small `sys.path` bootstrap cell so it also works when the kernel is started inside the subdirectory.
+Then open any notebook in `canonical_comparison/`, `german_credit/`, etc. Each notebook starts with a small `sys.path` bootstrap cell so it also works when the kernel is started inside the subdirectory.
 
 ## Running the headless scripts
 
+All scripts must be run from the `causal-shapley/` root using the `-m` module syntax:
+
 ```bash
 # Main table (S1, S2, S3)
-python -m 02_path_wise_experiments.run_main_table
+python3.12 -m path_wise_experiments.run_main_table
 
 # Local PE-SHAP decomposition figure
-python -m 02_path_wise_experiments.run_local_figure
+python3.12 -m path_wise_experiments.run_local_figure
 
 # Closed-form chain mediation derivation
-python -m 02_path_wise_experiments.experiment1_chain
+python3.12 -m path_wise_experiments.experiment1_chain
 
 # Closed-form parallel-mediator derivation
-python -m 02_path_wise_experiments.experiment2_parallel
+python3.12 -m path_wise_experiments.experiment2_parallel
 
 # German Credit case study (PE-SHAP + PW-SHAP)
-python 03_german_credit/german_credit_pe_pw.py
+python3.12 -m german_credit.german_credit_pe_pw
 ```
 
 ## Quick API reference

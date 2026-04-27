@@ -35,7 +35,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from simulations.simulations import (
+from data.simulations import (
     chain_mediation_dataset,
     CHAIN_T_COL, CHAIN_M1_COL, CHAIN_M2_COL,
     parallel_interaction_dataset,
@@ -43,11 +43,11 @@ from simulations.simulations import (
     combined_realistic_dataset,
     COMB_T_COL, COMB_C_COL, COMB_M1_COL, COMB_M2_COL,
 )
-from experiments._common import train_model, split_train_eval
-from path_wise.synthetic_attribution import (
+from path_wise_experiments._common import train_model, split_train_eval
+from path_wise_experiments.path_wise.synthetic_attribution import (
     attribution_average, attribution_summary,
 )
-from path_wise.causal_shapley_local import causal_shapley_row
+from path_wise_experiments.path_wise.causal_shapley_local import causal_shapley_row
 
 
 # =============================================================================

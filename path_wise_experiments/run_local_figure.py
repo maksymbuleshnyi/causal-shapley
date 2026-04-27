@@ -20,16 +20,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 
-from simulations.simulations import (
+from data.simulations import (
     parallel_interaction_dataset,
     PAR_T_COL, PAR_M1_COL, PAR_M2_COL,
 )
-from experiments._common import train_model, split_train_eval
-from path_wise.synthetic_attribution import (
+from path_wise_experiments._common import train_model, split_train_eval
+from path_wise_experiments.path_wise.synthetic_attribution import (
     local_decomposition,
     cate_block,
 )
-from path_wise.causal_shapley_local import causal_shapley_direct_indirect_row
+from path_wise_experiments.path_wise.causal_shapley_local import causal_shapley_direct_indirect_row
 
 
 S2_DAG_PARENTS = {
