@@ -171,8 +171,6 @@ class Explainer(BaseModel):
                 abs_diff, f1, f2 = self.get_value(type, list(permutation), x, causal_struct,
                                                 xi)
                 
-                print(abs_diff)
-                print([permutation])
                 m += 1
                 vf1 += f1
                 vf2 += f2
@@ -307,4 +305,4 @@ class Explainer(BaseModel):
         return absolute_diff, f1 / propensity_weight_f1, f2 / propensity_weight_f2
 
 
-# Some of the code sample are taken from https://github.com/saifkhanali9/causal-shapley
+# Some of the code samples are taken from https://github.com/saifkhanali9/causal-shapley

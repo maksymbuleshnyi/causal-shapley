@@ -238,3 +238,94 @@ class CombinedModelWrapper:
         M1 = X[:, COMB_M1_COL]
         M2 = X[:, COMB_M2_COL]
         return C + T - 0.8 * M1 ** 2 - 0.5 * T * M1 + 0.4 * M1 * M2
+
+
+# ============================================================
+# Canonical causal structures (C1-C6) for Shapley-variants
+# comparison in Section "Comparing Shapley Variants"
+# (experiments_and_results, Table tab:shapley-comparison).
+# Each generator follows the SCM and feature layout shown in
+# Figure fig:shapley-structures.
+# ============================================================
+
+
+def c1_chain(num_samples=1000, seed=0):
+    """C1 - Chain: X1 -> X2, Y = X2.
+
+    Features: [X1, X2]. Sample point in chapter: (x1=1, x2=2).
+    """
+    rng = np.random.default_rng(seed)
+    X1 = rng.normal(0.5, 0.5, size=num_samples)
+    X2 = X1 + rng.normal(0.5, 0.5, size=num_samples)
+    Y = X2
+    features = np.column_stack([X1, X2])
+    return features, Y
+
+
+def c2_fork(num_samples=1000, seed=0):
+    """C2 - Fork: X2 -> X1, X2 -> Y.
+
+    Features: [X1, X2]. Sample point in chapter: (x1=2.5, x2=1.5).
+    """
+    rng = np.random.default_rng(seed)
+    X2 = rng.normal(0.5, 0.5, size=num_samples)
+    X1 = X2 + rng.normal(0.5, 0.5, size=num_samples)
+    Y = X2
+    features = np.column_stack([X1, X2])
+    return features, Y
+
+
+def c3_unobserved_feature_confounder(num_samples=1000, seed=0):
+    """C3 - Unobserved feature confounder: X3 -> X1, X3 -> X2, X2 -> Y. X3 hidden.
+
+    Features: [X1, X2] (X3 not in features). Sample: (x1=2, x2=2).
+    """
+    rng = np.random.default_rng(seed)
+    X3 = rng.normal(0.5, 0.5, size=num_samples)
+    X1 = X3 + rng.normal(0.5, 0.5, size=num_samples)
+    X2 = X3 + rng.normal(0.5, 0.5, size=num_samples)
+    Y = X2
+    features = np.column_stack([X1, X2])
+    return features, Y
+
+
+def c4_observed_feature_confounder(num_samples=1000, seed=0):
+    """C4 - Observed feature confounder: X3 -> X1, X3 -> X2, X2 -> Y. X3 in features.
+
+    Features: [X1, X2, X3]. Sample: (x1=2, x2=2, x3=1).
+    """
+    rng = np.random.default_rng(seed)
+    X3 = rng.normal(0.5, 0.5, size=num_samples)
+    X1 = X3 + rng.normal(0.5, 0.5, size=num_samples)
+    X2 = X3 + rng.normal(0.5, 0.5, size=num_samples)
+    Y = X2
+    features = np.column_stack([X1, X2, X3])
+    return features, Y
+
+
+def c5_collider(num_samples=1000, seed=0):
+    """C5 - Collider: X1 -> X3 <- X2, X3 -> Y, X2 -> Y.
+
+    Features: [X1, X2, X3]. Sample: (x1=0.75, x2=0.75, x3=2.25).
+    """
+    rng = np.random.default_rng(seed)
+    X1 = rng.normal(0.5, 0.5, size=num_samples)
+    X2 = rng.normal(0.5, 0.5, size=num_samples)
+    X3 = X1 + X2 + rng.normal(0.5, 0.5, size=num_samples)
+    Y = X2 + X3
+    features = np.column_stack([X1, X2, X3])
+    return features, Y
+
+
+def c6_unobserved_prediction_confounder(num_samples=1000, seed=0):
+    """C6 - Unobserved prediction confounder: X3 -> X1, X3 -> Y, X2 -> Y. X3 hidden.
+
+    Features: [X1, X2] (X3 not in features). Sample: (x1=2, x2=1).
+    """
+    rng = np.random.default_rng(seed)
+    X3 = rng.normal(0.5, 0.5, size=num_samples)
+    X1 = X3 + rng.normal(0.5, 0.5, size=num_samples)
+    X2 = rng.normal(0.5, 0.5, size=num_samples)
+    Y = X3 + X2
+    features = np.column_stack([X1, X2])
+    return features, Y

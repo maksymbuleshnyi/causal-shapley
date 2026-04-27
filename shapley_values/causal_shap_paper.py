@@ -187,6 +187,3 @@ class CausalExplainer(Explainer):
             x_hat_2 = np.squeeze(x_hat_2)
         absolute_diff = f1 - f2
         return absolute_diff, f1, f2
-
-
-# Some of the code sample are taken from https://github.com/saifkhanali9/causal-shapley
