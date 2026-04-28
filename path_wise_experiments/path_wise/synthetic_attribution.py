@@ -1,34 +1,3 @@
-"""
-Clean path-attribution estimators for the synthetic PE-SHAP experiments.
-
-All estimators work on a generic layout where each row of X contains a
-binary treatment column, an optional confounder column, and one or more
-mediator columns.  They evaluate attributions for a trained black-box
-model by conditioning on subsets of features via a nearest-neighbour
-window on X (the standard filter-close estimator used in the existing
-``path_wise/path_wise.py`` module, specialised for arbitrary mediator
-layouts).
-
-Definitions (informal).  Let
-
-    v_block(S)(x)
-        = E[ f(T=1, x_S, X_{-S}) | window(x) ] - E[ f(T=0, x_S, X_{-S}) | window(x) ]
-
-be the CATE conditional on the mediators in S being fixed at the
-evaluation point x and the remaining mediators integrated out over
-their empirical T-conditional distribution.  The paper-style
-attributions are then
-
-    PE-SHAP( T -> M_k -> Y )  =  v_block(emptyset)       -  v_block({M_k})
-    PW-SHAP( T -> M_k -> Y )  =  v_block(all mediators)  -  v_block(all mediators \ {M_k})
-    Causal indirect (lumped)  =  v_block(emptyset)       -  v_block(all mediators)
-    Direct (CDE)              =  v_block(all mediators)
-
-Averaging these over held-out samples drawn from the control arm
-(T = 0) recovers the analytic path-effect formulas derived in the
-thesis motivational examples.
-"""
-
 from __future__ import annotations
 
 import numpy as np

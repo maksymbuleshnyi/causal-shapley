@@ -1,21 +1,8 @@
-"""
-Compute local attribution values for the S2 bar-chart figure.
-
-Uses the parallel-mediator-with-interaction DGP (Experiment 2):
-    T ~ Bernoulli(0.5)
-    M1 = α1·T + U1
-    M2 = α2·T + U2
-    Y  = β1·T + β2·M1 + β3·M2 + β4·M1·T + β5·M1·M2 + UY
-
-Produces numbers for two treated-arm samples across three methods
-(PE-SHAP, PW-SHAP, Causal Shapley direct/indirect).  Each run uses
-an independently seeded dataset + MLP; results are averaged over
-``n_runs`` Monte Carlo trials to report mean ± MC std.
-"""
-
 from __future__ import annotations
 
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
@@ -29,7 +16,9 @@ from path_wise_experiments.path_wise.synthetic_attribution import (
     local_decomposition,
     cate_block,
 )
-from path_wise_experiments.path_wise.causal_shapley_local import causal_shapley_direct_indirect_row
+from path_wise_experiments.path_wise.causal_shapley_local import (
+    causal_shapley_direct_indirect_row,
+)
 
 
 S2_DAG_PARENTS = {
@@ -44,11 +33,10 @@ S2_PARAMS = dict(
     beta4=0.2, beta5=0.8,
 )
 
-# Columns: [T, M1, M2]
-# S1: typical treated (T=1, near treated-arm means)
-# S2: high-M1 treated (T=1, M1 well above mean — M2 sign flips)
+# Sample 1: typical treated; Sample 2: high M1 — interaction flips M2 sign.
 FIXED_SAMPLE_1 = np.array([1.0, 0.50, 0.70])
 FIXED_SAMPLE_2 = np.array([1.0, 1.50, 0.70])
+
 
 def _run_one(seed, sample_1, sample_2,
              n_total=10000, n_eval=200, model_type="mlp",
@@ -138,77 +126,8 @@ def run_all(n_runs=20, **kwargs):
         agg[k] = {"mean": float(vals.mean()), "std": float(vals.std())}
     agg["s1_sample"] = sample_1.copy()
     agg["s2_sample"] = sample_2.copy()
+    agg["n_runs"] = n_runs
     return agg
-
-
-def print_results(agg):
-    print("\n" + "=" * 72)
-    print("LOCAL FIGURE VALUES  (mean ± MC std over independent runs)")
-    print("=" * 72)
-    col_names = ["T", "M1", "M2"]
-    for tag, label in [("s1", "Sample 1 (typical treated)"),
-                       ("s2", "Sample 2 (high M1)")]:
-        print(f"\n--- {label} ---")
-        s = agg[f"{tag}_sample"]
-        feat_str = ", ".join(
-            f"{col_names[i]}={s[i]:.3f}" for i in range(len(col_names))
-        )
-        print(f"  Features: {feat_str}")
-        print(f"  PE-SHAP (raw path effects):")
-        print(f"    lam_M1      = {agg[f'{tag}_lam_m1']['mean']:+.4f} ± {agg[f'{tag}_lam_m1']['std']:.4f}")
-        print(f"    lam_M2      = {agg[f'{tag}_lam_m2']['mean']:+.4f} ± {agg[f'{tag}_lam_m2']['std']:.4f}")
-        print(f"    lam_M1M2    = {agg[f'{tag}_lam_m1m2']['mean']:+.4f} ± {agg[f'{tag}_lam_m1m2']['std']:.4f}")
-        print(f"    v_free      = {agg[f'{tag}_v_free']['mean']:+.4f} ± {agg[f'{tag}_v_free']['std']:.4f}")
-        print(f"    v_all       = {agg[f'{tag}_v_all']['mean']:+.4f} ± {agg[f'{tag}_v_all']['std']:.4f}")
-        print(f"    delta       = {agg[f'{tag}_delta']['mean']:+.4f} ± {agg[f'{tag}_delta']['std']:.4f}")
-        print(f"  PE-SHAP (Shapley-corrected):")
-        print(f"    phi_M1      = {agg[f'{tag}_pe_m1']['mean']:+.4f} ± {agg[f'{tag}_pe_m1']['std']:.4f}")
-        print(f"    phi_M2      = {agg[f'{tag}_pe_m2']['mean']:+.4f} ± {agg[f'{tag}_pe_m2']['std']:.4f}")
-        print(f"    sum(phi)    = {agg[f'{tag}_pe_sum']['mean']:+.4f} ± {agg[f'{tag}_pe_sum']['std']:.4f}")
-
-        print(f"  PW-SHAP:")
-        print(f"    Psi_M1      = {agg[f'{tag}_pw_m1']['mean']:+.4f} ± {agg[f'{tag}_pw_m1']['std']:.4f}")
-        print(f"    Psi_M2      = {agg[f'{tag}_pw_m2']['mean']:+.4f} ± {agg[f'{tag}_pw_m2']['std']:.4f}")
-
-        print(f"  Causal Shapley (T):")
-        print(f"    phi_dir_T   = {agg[f'{tag}_cs_dir_T']['mean']:+.4f} ± {agg[f'{tag}_cs_dir_T']['std']:.4f}")
-        print(f"    phi_ind_T   = {agg[f'{tag}_cs_ind_T']['mean']:+.4f} ± {agg[f'{tag}_cs_ind_T']['std']:.4f}")
-        print(f"    phi_tot_T   = {agg[f'{tag}_cs_tot_T']['mean']:+.4f} ± {agg[f'{tag}_cs_tot_T']['std']:.4f}")
-        print(f"    dir+ind gap = {agg[f'{tag}_cs_dir_T']['mean'] + agg[f'{tag}_cs_ind_T']['mean'] - agg[f'{tag}_cs_tot_T']['mean']:+.4f}")
-
-    print("\n" + "=" * 72)
-    print("LaTeX mock values (paste into figure):")
-    print("=" * 72)
-    def v(key):
-        return f"{agg[key]['mean']:+.3f} ± {agg[key]['std']:.3f}"
-    for tag, label in [("s1", "Sample x_1"), ("s2", "Sample x_2")]:
-        s = agg[f"{tag}_sample"]
-        feat_str = ", ".join(
-            f"{col_names[i]}={s[i]:.3f}" for i in range(len(col_names))
-        )
-        print(f"\n% {label}  ({feat_str})")
-        print(f"% lam_M1       = {v(f'{tag}_lam_m1')}")
-        print(f"% lam_M2       = {v(f'{tag}_lam_m2')}")
-        print(f"% lam_M1M2     = {v(f'{tag}_lam_m1m2')}")
-        print(f"% delta        = {v(f'{tag}_delta')}")
-        print(f"% phi^PE_M1    = {v(f'{tag}_pe_m1')}")
-        print(f"% phi^PE_M2    = {v(f'{tag}_pe_m2')}")
-        print(f"% sum phi^PE   = {v(f'{tag}_pe_sum')}")
-        print(f"% Psi^PW_M1    = {v(f'{tag}_pw_m1')}")
-        print(f"% Psi^PW_M2    = {v(f'{tag}_pw_m2')}")
-        print(f"% phi^CS,dir_T = {v(f'{tag}_cs_dir_T')}")
-        print(f"% phi^CS,ind_T = {v(f'{tag}_cs_ind_T')}")
-        print(f"% phi^CS_T     = {v(f'{tag}_cs_tot_T')}")
-
-    gt = _analytic_gt()
-    print(f"\n% Analytic GT (PE path M1) = {gt['pe_m1']:+.4f}")
-    print(f"% Analytic GT (PE path M2) = {gt['pe_m2']:+.4f}")
-    print(f"% Analytic GT (PW path M1) = {gt['pw_m1']:+.4f}")
-    print(f"% Analytic GT (PW path M2) = {gt['pw_m2']:+.4f}")
-
-    scalar_keys = [k for k in agg if not k.endswith("_sample")]
-    max_std = max(agg[k]["std"] for k in scalar_keys)
-    print(f"\n% Max MC std across all quantities: {max_std:.4f}")
 
 
 def _analytic_gt():
@@ -218,6 +137,92 @@ def _analytic_gt():
     pw_m1 = p["alpha1"] * (p["beta2"] + p["beta4"])
     pw_m2 = p["alpha2"] * p["beta3"]
     return {"pe_m1": pe_m1, "pe_m2": pe_m2, "pw_m1": pw_m1, "pw_m2": pw_m2}
+
+
+def _block(title, rows, width=72):
+    lines = ['=' * width, title, '=' * width,
+             f"{'Metric':<35}{'Mean':>14}{'Std':>14}",
+             '-' * width]
+    for name, m, s in rows:
+        lines.append(f"{name:<35}{m:>+14.4f}{s:>14.4f}")
+    return '\n'.join(lines)
+
+
+def build_summary(agg):
+    col_names = ["T", "M1", "M2"]
+    parts = []
+    parts.append('=' * 80)
+    parts.append("Local attributions on S2 -- two treated samples")
+    parts.append('=' * 80)
+    parts.append(f"n_runs = {agg['n_runs']}   "
+                 f"(mean +/- MC std over independent retrains)")
+    parts.append('')
+
+    for tag, label in [("s1", "Sample x_1 (typical treated)"),
+                       ("s2", "Sample x_2 (high M1)")]:
+        sample = agg[f"{tag}_sample"]
+        feat_str = ", ".join(f"{col_names[i]}={sample[i]:.3f}"
+                             for i in range(len(col_names)))
+        rows = [
+            ("PE lambda_M1",          agg[f"{tag}_lam_m1"]["mean"],   agg[f"{tag}_lam_m1"]["std"]),
+            ("PE lambda_M2",          agg[f"{tag}_lam_m2"]["mean"],   agg[f"{tag}_lam_m2"]["std"]),
+            ("PE lambda_M1M2",        agg[f"{tag}_lam_m1m2"]["mean"], agg[f"{tag}_lam_m1m2"]["std"]),
+            ("PE phi_M1 (Shapley)",   agg[f"{tag}_pe_m1"]["mean"],    agg[f"{tag}_pe_m1"]["std"]),
+            ("PE phi_M2 (Shapley)",   agg[f"{tag}_pe_m2"]["mean"],    agg[f"{tag}_pe_m2"]["std"]),
+            ("PE sum(phi)",           agg[f"{tag}_pe_sum"]["mean"],   agg[f"{tag}_pe_sum"]["std"]),
+            ("PW Psi_M1",             agg[f"{tag}_pw_m1"]["mean"],    agg[f"{tag}_pw_m1"]["std"]),
+            ("PW Psi_M2",             agg[f"{tag}_pw_m2"]["mean"],    agg[f"{tag}_pw_m2"]["std"]),
+            ("CS direct (T)",         agg[f"{tag}_cs_dir_T"]["mean"], agg[f"{tag}_cs_dir_T"]["std"]),
+            ("CS indirect (T)",       agg[f"{tag}_cs_ind_T"]["mean"], agg[f"{tag}_cs_ind_T"]["std"]),
+            ("CS total (T)",          agg[f"{tag}_cs_tot_T"]["mean"], agg[f"{tag}_cs_tot_T"]["std"]),
+        ]
+        parts.append(_block(f"{label}   ({feat_str})", rows))
+        parts.append('')
+
+    # Combined two-row table (one row per sample, columns = key methods).
+    cell_w = 22
+    col_w = 14
+    total_w = col_w + 6 * cell_w
+
+    def cell(key, tag):
+        m, s = agg[f"{tag}_{key}"]["mean"], agg[f"{tag}_{key}"]["std"]
+        return f"{m:+.3f} +/- {s:.3f}"
+
+    header = (f"{'Sample':<{col_w}}"
+              f"{'phi^PE_M1':^{cell_w}}{'phi^PE_M2':^{cell_w}}{'sum phi^PE':^{cell_w}}"
+              f"{'Psi^PW_M1':^{cell_w}}{'Psi^PW_M2':^{cell_w}}{'phi^CS_T':^{cell_w}}")
+    parts.append('=' * total_w)
+    parts.append("Combined per-sample summary (mean +/- std across runs)")
+    parts.append('=' * total_w)
+    parts.append(header)
+    parts.append('-' * total_w)
+    for tag, label in [("s1", "x_1"), ("s2", "x_2")]:
+        parts.append(
+            f"{label:<{col_w}}"
+            f"{cell('pe_m1', tag):^{cell_w}}"
+            f"{cell('pe_m2', tag):^{cell_w}}"
+            f"{cell('pe_sum', tag):^{cell_w}}"
+            f"{cell('pw_m1', tag):^{cell_w}}"
+            f"{cell('pw_m2', tag):^{cell_w}}"
+            f"{cell('cs_tot_T', tag):^{cell_w}}"
+        )
+    parts.append('=' * total_w)
+
+    gt = _analytic_gt()
+    parts.append('')
+    parts.append("Analytic ground truth (from S2 SCM, no data, no model):")
+    parts.append(f"  PE path M1 = {gt['pe_m1']:+.4f}")
+    parts.append(f"  PE path M2 = {gt['pe_m2']:+.4f}")
+    parts.append(f"  PW path M1 = {gt['pw_m1']:+.4f}")
+    parts.append(f"  PW path M2 = {gt['pw_m2']:+.4f}")
+
+    scalar_keys = [k for k in agg
+                   if not k.endswith("_sample") and k != "n_runs"]
+    max_std = max(agg[k]["std"] for k in scalar_keys)
+    parts.append('')
+    parts.append(f"Max MC std across all quantities: {max_std:.4f}")
+
+    return '\n'.join(parts)
 
 
 if __name__ == "__main__":
@@ -241,4 +246,12 @@ if __name__ == "__main__":
         cs_n_mc=args.cs_n_mc,
         cs_eps=args.cs_eps,
     )
-    print_results(agg)
+
+    summary = build_summary(agg)
+    print('\n' + summary)
+
+    os.makedirs('./results', exist_ok=True)
+    out_path = './results/local_attributions_s2.txt'
+    with open(out_path, 'w') as f:
+        f.write(summary + '\n')
+    print(f"\nWrote summary to {out_path}")

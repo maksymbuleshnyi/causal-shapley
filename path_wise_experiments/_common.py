@@ -1,5 +1,3 @@
-"""Training helpers shared across experiment scripts."""
-
 from __future__ import annotations
 
 import numpy as np

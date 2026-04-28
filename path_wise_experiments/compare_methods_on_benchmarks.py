@@ -1,35 +1,9 @@
-"""
-Main-table runner for the path-wise attribution experiments.
-
-Runs the three benchmarks end to end and emits a LaTeX-ready fragment:
-
-  S1  chain mediation              (Experiment 1 — isolates PW-SHAP's
-                                    structural zero on a chain path)
-  S2  parallel mediators with
-      outcome interaction          (Experiment 2 — isolates the
-                                    interaction-driven magnitude / sign
-                                    error on the T -> M1 path)
-  S3  combined realistic DAG       (Experiment 3 — confounding,
-                                    nonlinearity and both mediation
-                                    patterns simultaneously; the
-                                    failure modes compose)
-
-For each benchmark we do R independent repetitions.  Every repetition
-draws a fresh synthetic dataset from the SEM, retrains the black-box
-model (MLP by default), and averages per-sample attributions over the
-held-out control-arm samples.  We then report the grand mean across
-the R repetitions and the Monte Carlo standard deviation across them
-— the reproducibility of the reported number under retraining and
-resampling.
-
-Usage:
-    python -m experiments.run_main_table
-
-Defaults are tuned for a quick smoke run (``n_runs=5``); bump
-``n_runs`` to 20 for the thesis-final numbers.
-"""
-
 from __future__ import annotations
+
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from dataclasses import dataclass
 
@@ -50,42 +24,7 @@ from path_wise_experiments.path_wise.synthetic_attribution import (
 from path_wise_experiments.path_wise.causal_shapley_local import causal_shapley_row
 
 
-# =============================================================================
-# Path decomposition on a 2-mediator DAG
-# =============================================================================
-#
-# Both PE-SHAP and PW-SHAP use single-mediator formulas against the
-# ATE baseline v_free = v_block(emptyset):
-#
-#     PE-SHAP(T -> M_k -> Y) = v_free - v_block({M_k})
-#     PW-SHAP(T -> M_k -> Y) = v_all  - v_block(all \ {M_k})
-#     direct(T -> Y)         = v_all
-#
-# In a DAG with a chain sub-path (e.g. T -> M1 -> M2 -> Y in S3),
-# pinning M_k severs every T-path that routes through M_k at once, so
-# PE-SHAP(T -> M_1 -> Y) lumps the direct M1 edge together with any
-# chain segment that passes through M1.  We therefore do not attempt
-# to report a separate chain column.
-# =============================================================================
-
-
-# =============================================================================
-# NIE on the trained model (method-independent ground truth)
-# =============================================================================
-#
-# For each control-arm sample we replay the SEM under T=0 and T=1,
-# keeping the same noise draws, then feed the counterfactual rows
-# through the trained model.  The NIE through a mediator M_k is
-#
-#     NIE_Yhat(M_k) = E[ Yhat(T=1, M_k(1), M_{-k}(0))
-#                      - Yhat(T=1, M_k(0), M_{-k}(0)) ]
-#
-# This is the natural indirect effect of the *model*, not the true Y.
-# It uses no attribution method — only counterfactual predictions.
-
-
 def _nie_s1(model, X_train, s1_params, n_samples=2000, seed=42):
-    """NIE_Yhat for the chain path T -> M1 -> M2 -> Y."""
     rng = np.random.default_rng(seed)
     a1, a2 = s1_params["a1"], s1_params["a2"]
     sigma = s1_params["sigma"]
@@ -102,7 +41,6 @@ def _nie_s1(model, X_train, s1_params, n_samples=2000, seed=42):
 
 
 def _nie_s2(model, X_train, s2_params, n_samples=2000, seed=42):
-    """Total NIE_Yhat for the parallel DGP (shift both M1 and M2)."""
     rng = np.random.default_rng(seed)
     alpha1, alpha2 = s2_params["alpha1"], s2_params["alpha2"]
     sigma = s2_params["sigma"]
@@ -119,7 +57,6 @@ def _nie_s2(model, X_train, s2_params, n_samples=2000, seed=42):
 
 
 def _nie_s3(model, X_train, n_samples=2000, seed=42):
-    """Total NIE_Yhat for the combined DAG (all mediators shift together)."""
     rng = np.random.default_rng(seed)
     sigma = 0.5
     C = rng.normal(0.3, 0.5, n_samples)
@@ -139,6 +76,46 @@ def _nie_s3(model, X_train, n_samples=2000, seed=42):
     return float(total - direct)
 
 
+def _cde_g_formula(model, X_train, T_col, ancestor_cols, fix_col, fix_value,
+                   rng=None):
+    """Plug-in g-computation CDE(X_{fix_col} = fix_value).
+
+    Used when Property 1 fails: the fix variable has unblocked ancestors
+    that need to be resampled from their T-conditional distributions to
+    avoid reintroducing confounding through C.
+    """
+    if rng is None:
+        rng = np.random.default_rng(0)
+    n = len(X_train)
+
+    M_T1 = {a: X_train[X_train[:, T_col] == 1, a] for a in ancestor_cols}
+    M_T0 = {a: X_train[X_train[:, T_col] == 0, a] for a in ancestor_cols}
+
+    X_synth_1 = X_train.copy()
+    X_synth_1[:, T_col] = 1
+    for a in ancestor_cols:
+        X_synth_1[:, a] = rng.choice(M_T1[a], size=n)
+    X_synth_1[:, fix_col] = fix_value
+    y_do_T1 = float(model.predict(X_synth_1).mean())
+
+    X_synth_0 = X_train.copy()
+    X_synth_0[:, T_col] = 0
+    for a in ancestor_cols:
+        X_synth_0[:, a] = rng.choice(M_T0[a], size=n)
+    X_synth_0[:, fix_col] = fix_value
+    y_do_T0 = float(model.predict(X_synth_0).mean())
+
+    return y_do_T1 - y_do_T0
+
+
+def _ate_g_formula(model, X_train, T_col):
+    X1 = X_train.copy()
+    X1[:, T_col] = 1
+    X0 = X_train.copy()
+    X0[:, T_col] = 0
+    return float(model.predict(X1).mean() - model.predict(X0).mean())
+
+
 def _pe_paths(summary, m1_col, m2_col):
     return {
         "direct": summary["direct_cde"]["mean"],
@@ -155,9 +132,9 @@ def _pw_paths(summary, m1_col, m2_col):
     }
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Per-benchmark single-run estimators
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 
 def _run_s1(seed, a1, a2, b1, b2, sigma, n_total, n_eval, model_type):
@@ -203,8 +180,7 @@ def _run_s2(seed, alpha1, alpha2, beta1, beta2, beta3, beta4, beta5,
     s = attribution_summary(per)
     pe = _pe_paths(s, PAR_M1_COL, PAR_M2_COL)
     pw = _pw_paths(s, PAR_M1_COL, PAR_M2_COL)
-    # Causal SHAP: per-feature symmetric Heskes value, averaged over
-    # a subset of control-arm samples.
+
     dag_parents = {
         PAR_T_COL: [],
         PAR_M1_COL: [PAR_T_COL],
@@ -252,11 +228,30 @@ def _run_s3(seed, sigma, n_total, n_eval, model_type):
     s = attribution_summary(per)
     pe = _pe_paths(s, COMB_M1_COL, COMB_M2_COL)
     pw = _pw_paths(s, COMB_M1_COL, COMB_M2_COL)
+
+    # Property 1 fails for lambda_{M_2} on S3 (M_1 is an ancestor of M_2),
+    # so the C-CATE estimator does not identify CDE(M_2 = m_2). Recover
+    # lambda_{M_2} via the g-formula treating M_1 as an ancestor mediator
+    # resampled from P(M_1 | T=t).
+    ate_g = _ate_g_formula(model, X_train, COMB_T_COL)
+    rng_g = np.random.default_rng(seed + 50_000)
+    cde_m2_vals = []
+    for x in ctrl:
+        cde_m2_vals.append(
+            _cde_g_formula(
+                model, X_train, COMB_T_COL,
+                ancestor_cols=(COMB_M1_COL,),
+                fix_col=COMB_M2_COL, fix_value=x[COMB_M2_COL],
+                rng=rng_g,
+            )
+        )
+    pe_path_m2_g = ate_g - float(np.mean(cde_m2_vals))
+
     nie = _nie_s3(model, X_train)
     return {
         "pe_direct": pe["direct"],
         "pe_path_m1": pe["path_m1"],
-        "pe_path_m2": pe["path_m2"],
+        "pe_path_m2": pe_path_m2_g,
         "pe_indirect": s["causal_indirect"]["mean"],
         "pw_direct": pw["direct"],
         "pw_path_m1": pw["path_m1"],
@@ -268,9 +263,9 @@ def _run_s3(seed, sigma, n_total, n_eval, model_type):
     }
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Monte Carlo aggregation
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 
 def _mc_aggregate(records):
@@ -289,9 +284,8 @@ class RunConfig:
     n_total: int = 10000
     n_eval: int = 500
     model_type: str = "mlp"
-    # S2 Causal SHAP: inner-loop size.  Kept small because each call
-    # involves a full 2^n_features coalition sweep with Monte Carlo
-    # draws per coalition.
+    # S2 Causal SHAP: full 2^n_features coalition sweep with MC draws per
+    # coalition, so the inner-loop size is kept small.
     s2_cs_n_eval: int = 30
     s2_cs_n_mc: int = 200
     s2_cs_eps: float = 0.25
@@ -308,7 +302,6 @@ def run_all(cfg: RunConfig | None = None, s1_params=None, s2_params=None):
         sigma=0.5,
     )
 
-    # ----------------------------------------------------------------- S1
     print(f"[S1] chain mediation  ({cfg.n_runs} repetitions)")
     s1_recs = {"pe": [], "pw": [], "cs": [], "nie": []}
     for r in range(cfg.n_runs):
@@ -323,7 +316,6 @@ def run_all(cfg: RunConfig | None = None, s1_params=None, s2_params=None):
               f"nie={out['nie']:+.3f}")
     s1 = _mc_aggregate(s1_recs)
 
-    # ----------------------------------------------------------------- S2
     print(f"\n[S2] parallel with interaction  ({cfg.n_runs} repetitions)")
     s2_keys = [
         "pe_direct", "pe_path_m1", "pe_path_m2", "pe_indirect",
@@ -347,7 +339,6 @@ def run_all(cfg: RunConfig | None = None, s1_params=None, s2_params=None):
               f"nie={out['nie']:+.3f}")
     s2 = _mc_aggregate(s2_recs)
 
-    # ----------------------------------------------------------------- S3
     print(f"\n[S3] combined realistic DAG  ({cfg.n_runs} repetitions)")
     s3_keys = [
         "pe_direct", "pe_path_m1", "pe_path_m2", "pe_indirect",
@@ -385,151 +376,144 @@ def mc_bound(results):
     return max(cells)
 
 
-# =============================================================================
-# Pretty printers
-# =============================================================================
+# ---------------------------------------------------------------------------
+# Output formatting
+# ---------------------------------------------------------------------------
 
 
-def print_summary(results):
-    cfg = results["cfg"]
-    print("\n" + "=" * 68)
-    print(f"Main-table results   (R={cfg.n_runs}, n_total={cfg.n_total}, "
-          f"n_eval={cfg.n_eval}, model={cfg.model_type})")
-    print("=" * 68)
-
-    def fmt(pair):
-        m, s = pair
-        return f"{m:+.3f}  (mc_std={s:.3f})"
-
-    s1, s2, s3 = results["s1"], results["s2"], results["s3"]
-
-    print("\nS1  chain path  T -> M1 -> M2 -> Y")
-    print(f"  PE-SHAP      = {fmt(s1['pe'])}")
-    print(f"  PW-SHAP      = {fmt(s1['pw'])}")
-    print(f"  Causal SHAP  = {fmt(s1['cs'])}")
-    print(f"  NIE_Yhat     = {fmt(s1['nie'])}")
-
-    print("\nS2  parallel with interaction")
-    print("                  via M1    via M2    indirect")
-    print(f"  PE-SHAP      "
-          f"{s2['pe_path_m1'][0]:+8.3f} "
-          f"{s2['pe_path_m2'][0]:+8.3f} "
-          f"{s2['pe_indirect'][0]:+8.3f}")
-    print(f"  PW-SHAP      "
-          f"{s2['pw_path_m1'][0]:+8.3f} "
-          f"{s2['pw_path_m2'][0]:+8.3f} "
-          f"  ---")
-    print(f"  Causal SHAP  "
-          f"  ---       ---     "
-          f"{s2['cs_indirect'][0]:+8.3f}")
-    print(f"  NIE_Yhat     "
-          f"  ---       ---     "
-          f"{s2['nie'][0]:+8.3f}")
-
-    print("\nS3  combined DAG  path decomposition")
-    print("                  direct    via M1    via M2    indirect")
-    print(f"  PE-SHAP      "
-          f"{s3['pe_direct'][0]:+8.3f} "
-          f"{s3['pe_path_m1'][0]:+8.3f} "
-          f"{s3['pe_path_m2'][0]:+8.3f} "
-          f"{s3['pe_indirect'][0]:+8.3f}")
-    print(f"  PW-SHAP      "
-          f"{s3['pw_direct'][0]:+8.3f} "
-          f"{s3['pw_path_m1'][0]:+8.3f} "
-          f"{s3['pw_path_m2'][0]:+8.3f} "
-          f"  ---")
-    print(f"  Causal SHAP  "
-          f"{s3['cs_direct'][0]:+8.3f} "
-          f"  ---       ---     "
-          f"{s3['cs_lumped_indirect'][0]:+8.3f}")
-    print(f"  NIE_Yhat     "
-          f"  ---     "
-          f"  ---     "
-          f"  ---     "
-          f"{s3['nie'][0]:+8.3f}")
-
-    print(f"\nMax MC std across all reported cells: {mc_bound(results):.4f}")
-    print("(Round this up to a clean value and use it as the caption bound.)")
+def _cell(pair):
+    m, s = pair
+    return f"{m:+.3f} +/- {s:.3f}"
 
 
-def print_latex(results):
+def _block(title, rows, width=72):
+    lines = ['=' * width, title, '=' * width,
+             f"{'Metric':<35}{'Mean':>14}{'Std':>14}",
+             '-' * width]
+    for name, (m, s) in rows:
+        lines.append(f"{name:<35}{m:>+14.4f}{s:>14.4f}")
+    return '\n'.join(lines)
+
+
+def build_summary(results):
     cfg = results["cfg"]
     s1, s2, s3 = results["s1"], results["s2"], results["s3"]
 
-    def v(pair):
-        m, s = pair
-        return f"${m:+.2f}" + r"{\scriptstyle\pm" + f"{s:.2f}" + r"}$"
+    parts = []
+    parts.append('=' * 80)
+    parts.append("Path-wise attributions on S1, S2, S3")
+    parts.append('=' * 80)
+    parts.append(f"R = {cfg.n_runs} repetitions   "
+                 f"n_total = {cfg.n_total}   "
+                 f"n_eval = {cfg.n_eval}   "
+                 f"model = {cfg.model_type}")
+    parts.append('')
 
-    def vb(pair):
-        m, s = pair
-        return r"$\mathbf{" + f"{m:+.2f}" + r"}{\scriptstyle\pm" + f"{s:.2f}" + r"}$"
+    parts.append(_block(
+        "S1: chain mediation  (T -> M1 -> M2 -> Y)",
+        [("PE-SHAP (M1 path)", s1["pe"]),
+         ("PW-SHAP (M1 path)", s1["pw"]),
+         ("Causal SHAP (indirect)", s1["cs"]),
+         ("NIE_Yhat (reference)", s1["nie"])],
+    ))
+    parts.append('')
 
-    print("\n" + "=" * 68)
-    print("LaTeX fragment (paste into the thesis experiments section):")
-    print("=" * 68)
-    lines = [
-        r"\begin{table*}[t]",
-        r"\centering",
-        r"\small",
-        r"\setlength{\tabcolsep}{4pt}",
-        r"\begin{tabular}{l c | ccc | ccc}",
-        r"\toprule",
-        (r"& \textbf{S1}"
-         r" & \multicolumn{3}{c|}{\textbf{S2}}"
-         r" & \multicolumn{3}{c}{\textbf{S3}} \\"),
-        (r"\cmidrule(lr){2-2}"
-         r" \cmidrule(lr){3-5}"
-         r" \cmidrule(lr){6-8}"),
-        (r"\textbf{Met.}"
-         r" & $M_1$"
-         r" & $M_1$ & $M_2$ & $M_{1,2}$"
-         r" & $M_1$ & $M_2$ & $M_{1,2}$ \\"),
-        r"\midrule",
-        # PE
-        (f"PE"
-         f" & {v(s1['pe'])}"
-         f" & {v(s2['pe_path_m1'])} & {v(s2['pe_path_m2'])}"
-         f" & {v(s2['pe_indirect'])}"
-         f" & {v(s3['pe_path_m1'])}"
-         f" & {v(s3['pe_path_m2'])} & {v(s3['pe_indirect'])} \\\\"),
-        # PW
-        (f"PW"
-         f" & {vb(s1['pw'])}"
-         f" & {v(s2['pw_path_m1'])} & {v(s2['pw_path_m2'])}"
-         f" & {v(s2['pw_indirect'])}"
-         f" & {vb(s3['pw_path_m1'])}"
-         f" & {vb(s3['pw_path_m2'])} & {v(s3['pw_indirect'])} \\\\"),
-        # CS
-        (f"CS"
-         f" & {v(s1['cs'])}"
-         f" & --- & ---"
-         f" & {v(s2['cs_indirect'])}"
-         f" & --- & ---"
-         f" & {v(s3['cs_lumped_indirect'])} \\\\"),
-        r"\midrule",
-        # NIE
-        (f"$\\mathrm{{NIE}}_{{\\hat Y}}$"
-         f" & {v(s1['nie'])}"
-         f" & --- & ---"
-         f" & {v(s2['nie'])}"
-         f" & --- & ---"
-         f" & {v(s3['nie'])} \\\\"),
-        r"\bottomrule",
-        r"\end{tabular}",
-        (r"\caption{Path-level attributions across three synthetic benchmarks."
-         f" Each cell: mean $\\pm$ std over $R = {cfg.n_runs}$ independent"
-         r" runs (fresh data, retrained MLP)."
-         r" $M_{{1,2}}$: total mediated effect."
-         r" Bold: structural PW failures."
-         r" CS and $\mathrm{NIE}_{\hat Y}$: total indirect only.}"),
-        r"\label{tab:main-results}",
-        r"\end{table*}",
-    ]
-    print("\n".join(lines))
+    parts.append(_block(
+        "S2: parallel mediators with interaction",
+        [("PE-SHAP direct", s2["pe_direct"]),
+         ("PE-SHAP M1 path", s2["pe_path_m1"]),
+         ("PE-SHAP M2 path", s2["pe_path_m2"]),
+         ("PE-SHAP total mediated", s2["pe_indirect"]),
+         ("PW-SHAP M1 path", s2["pw_path_m1"]),
+         ("PW-SHAP M2 path", s2["pw_path_m2"]),
+         ("Causal SHAP indirect (sum)", s2["cs_indirect"]),
+         ("NIE_Yhat (reference)", s2["nie"])],
+    ))
+    parts.append('')
+
+    parts.append(_block(
+        "S3: combined realistic DAG",
+        [("PE-SHAP direct", s3["pe_direct"]),
+         ("PE-SHAP M1 path", s3["pe_path_m1"]),
+         ("PE-SHAP M2 path (g-formula)", s3["pe_path_m2"]),
+         ("PE-SHAP total mediated", s3["pe_indirect"]),
+         ("PW-SHAP M1 path", s3["pw_path_m1"]),
+         ("PW-SHAP M2 path", s3["pw_path_m2"]),
+         ("Causal SHAP direct", s3["cs_direct"]),
+         ("Causal SHAP lumped indirect", s3["cs_lumped_indirect"]),
+         ("NIE_Yhat (reference)", s3["nie"])],
+    ))
+    parts.append('')
+
+    # Combined layout: rows = methods, columns = (S1 M1) | (S2 M1, M2, M1,2) | (S3 M1, M2, M1,2)
+    col_w = 8
+    cell_w = 18
+    total_w = col_w + 7 * cell_w
+    header_top = (f"{'':<{col_w}}"
+                  f"{'S1':^{cell_w}}"
+                  f"{'S2':^{3 * cell_w}}"
+                  f"{'S3':^{3 * cell_w}}")
+    header_sub = (f"{'Method':<{col_w}}"
+                  f"{'M1':^{cell_w}}"
+                  f"{'M1':^{cell_w}}{'M2':^{cell_w}}{'M1,2':^{cell_w}}"
+                  f"{'M1':^{cell_w}}{'M2':^{cell_w}}{'M1,2':^{cell_w}}")
+
+    def row_method(label, s1_m1, s2_m1, s2_m2, s2_tot, s3_m1, s3_m2, s3_tot):
+        return (f"{label:<{col_w}}"
+                f"{_cell(s1_m1):^{cell_w}}"
+                f"{_cell(s2_m1):^{cell_w}}{_cell(s2_m2):^{cell_w}}{_cell(s2_tot):^{cell_w}}"
+                f"{_cell(s3_m1):^{cell_w}}{_cell(s3_m2):^{cell_w}}{_cell(s3_tot):^{cell_w}}")
+
+    def row_dashes(label, s1_m1, s2_tot, s3_tot):
+        return (f"{label:<{col_w}}"
+                f"{_cell(s1_m1):^{cell_w}}"
+                f"{'---':^{cell_w}}{'---':^{cell_w}}{_cell(s2_tot):^{cell_w}}"
+                f"{'---':^{cell_w}}{'---':^{cell_w}}{_cell(s3_tot):^{cell_w}}")
+
+    parts.append('=' * total_w)
+    parts.append("Per-path attributions across S1, S2, S3 (mean +/- std)")
+    parts.append('=' * total_w)
+    parts.append(header_top)
+    parts.append(header_sub)
+    parts.append('-' * total_w)
+
+    parts.append(row_method(
+        "PE",
+        s1["pe"],
+        s2["pe_path_m1"], s2["pe_path_m2"], s2["pe_indirect"],
+        s3["pe_path_m1"], s3["pe_path_m2"], s3["pe_indirect"],
+    ))
+    parts.append(row_method(
+        "PW",
+        s1["pw"],
+        s2["pw_path_m1"], s2["pw_path_m2"], s2["pw_indirect"],
+        s3["pw_path_m1"], s3["pw_path_m2"], s3["pw_indirect"],
+    ))
+    parts.append(row_dashes(
+        "CS",
+        s1["cs"], s2["cs_indirect"], s3["cs_lumped_indirect"],
+    ))
+    parts.append('-' * total_w)
+    parts.append(row_dashes(
+        "NIE",
+        s1["nie"], s2["nie"], s3["nie"],
+    ))
+    parts.append('=' * total_w)
+    parts.append('')
+    parts.append(f"Max MC std across all reported cells: {mc_bound(results):.4f}")
+
+    return '\n'.join(parts)
 
 
 if __name__ == "__main__":
     cfg = RunConfig()
     results = run_all(cfg)
-    print_summary(results)
-    print_latex(results)
+
+    summary = build_summary(results)
+    print('\n' + summary)
+
+    os.makedirs('./results', exist_ok=True)
+    out_path = './results/methods_on_benchmarks.txt'
+    with open(out_path, 'w') as f:
+        f.write(summary + '\n')
+    print(f"\nWrote summary to {out_path}")

@@ -2,13 +2,11 @@
 import itertools
 import numpy as np
 import random
-import collections
 from shapley_values.probabilities import causal_prob
 from shapley_values.utils import get_baseline
 from shapley_values.exceptions import CausalModelException
 from shapley_values.causal_shap import Explainer
 from typing import Any, List
-import networkx as nx
 from copy import deepcopy
 random.seed(42)
 from enum import Enum

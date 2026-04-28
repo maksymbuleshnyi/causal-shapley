@@ -1,34 +1,3 @@
-"""
-Heskes-style symmetric Causal Shapley values for local explanations of
-a trained black-box model on a known DAG.
-
-Definitions.  For a feature set ``S``, the value function is
-
-    v(S, x) = E[ f(X) | do(X_S = x_S) ]
-
-i.e. the model's expected output when the features in ``S`` are fixed at
-the sample's values and the remaining features are resampled from the
-*do*-mutilated distribution induced by the DAG.  Once ``v(S, x)`` is in
-hand for every subset ``S`` of the feature set, the Causal Shapley value
-for feature ``i`` at the sample is the ordinary symmetric Shapley
-aggregation
-
-    phi_i(x) = sum_{S subset N \ {i}}
-                  |S|! (n - |S| - 1)! / n!
-                  * ( v(S ∪ {i}, x) − v(S, x) ).
-
-By construction ``sum_i phi_i(x) = f(x) − v(∅, x)``, which is the usual
-SHAP efficiency / local-accuracy identity.
-
-The value function is estimated by Monte Carlo: we walk the DAG in
-topological order; features in ``S`` are pinned at ``x`` and each
-non-intervened feature is sampled from its conditional on its *already
-filled* parents via a filter-close window on the training set.  Under
-the chain- and parallel-SEM DAGs used in the thesis experiments this
-produces an unbiased estimate of ``E[ f(X) | do(X_S = x_S) ]`` up to the
-usual nonparametric-regression bias of the window.
-"""
-
 from __future__ import annotations
 
 from itertools import combinations
